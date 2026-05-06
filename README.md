@@ -8,6 +8,15 @@ Native macOS client for S3-compatible object storage, designed especially for da
 
 ## Download And Run
 
+### Latest Release
+
+Download the latest macOS package from [GitHub Releases](https://github.com/macaitools/s3-client-lite/releases/latest).
+
+Release builds include:
+
+- `R2Desk-macOS.zip`
+- `R2Desk-macOS.dmg`
+
 ### From GitHub Actions
 
 Every push runs the macOS build workflow and uploads ready-to-run artifacts:

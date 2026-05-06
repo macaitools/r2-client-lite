@@ -3,8 +3,12 @@ name: Build macOS App
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -30,3 +34,15 @@ jobs:
           path: |
             dist/R2Desk-macOS.zip
             dist/R2Desk-macOS.dmg
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/R2Desk-macOS.zip \
+            dist/R2Desk-macOS.dmg \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "R2Desk $GITHUB_REF_NAME" \
+            --notes "macOS build for R2Desk $GITHUB_REF_NAME."
