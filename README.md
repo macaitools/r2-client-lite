@@ -2,6 +2,10 @@
 
 **Languages:** [English](README.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [हिन्दी](README.hi.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Português](README.pt.md) | [Русский](README.ru.md) | [日本語](README.ja.md) | [Français](README.fr.md)
 
+## License
+
+This project is source-available, not open source. It may be used only by individual persons for personal, non-commercial purposes. Commercial, business, organizational, resale, redistribution, hosting, or SaaS use is prohibited. See [LICENSE](LICENSE) for details.
+
 Native macOS client for S3-compatible object storage, designed especially for daily Cloudflare R2 file management.
 
 ![Bucket Browser](screens/01-bucket-browser.png)

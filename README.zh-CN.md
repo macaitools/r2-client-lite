@@ -2,6 +2,10 @@
 
 **语言：** [English](README.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [हिन्दी](README.hi.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Português](README.pt.md) | [Русский](README.ru.md) | [日本語](README.ja.md) | [Français](README.fr.md)
 
+## 授权
+
+本项目为源码可见项目，不是开源项目。仅允许个人出于个人、非商业目的使用。禁止商业使用、企业或组织使用、转售、再分发、托管给他人使用或作为 SaaS 使用。详情见 [LICENSE](LICENSE)。
+
 原生 macOS S3/R2 文件管理客户端，主打 Cloudflare R2 日常文件管理，也支持 S3 兼容对象存储。
 
 ![Bucket Browser](screens/01-bucket-browser.png)
