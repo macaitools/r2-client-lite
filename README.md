@@ -10,7 +10,7 @@ Native macOS client for S3-compatible object storage, designed especially for da
 
 ### Latest Release
 
-Download the latest macOS package from [GitHub Releases](https://github.com/macaitools/s3-client-lite/releases/latest).
+Download the latest macOS package from [GitHub Releases](https://github.com/macaitools/r2-client-lite/releases/latest).
 
 Release builds include:
 
