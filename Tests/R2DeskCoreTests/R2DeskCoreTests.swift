@@ -18,7 +18,8 @@ func configRoundTripsProfilesAndBuckets() throws {
         bucketName: "assets",
         endpoint: URL(string: "https://abc.r2.cloudflarestorage.com")!,
         region: "auto",
-        accessKeyID: "key-1"
+        accessKeyID: "key-1",
+        publicBaseURL: URL(string: "https://cdn.example.com/assets")!
     )
     let config = AppConfig(profiles: [
         StorageProfile(
@@ -26,7 +27,9 @@ func configRoundTripsProfilesAndBuckets() throws {
             name: "Cloudflare",
             buckets: [bucket]
         )
-    ], favoriteBucketIDs: [bucket.id], recentBucketIDs: [bucket.id])
+    ], favoriteBucketIDs: [bucket.id], recentBucketIDs: [bucket.id], favoriteDirectories: [
+        FavoriteDirectory(bucketID: bucket.id, bucketName: bucket.bucketName, prefix: "images/raw/")
+    ], languageCode: "en")
 
     let data = try JSONEncoder.r2Desk.encode(config)
     let decoded = try JSONDecoder.r2Desk.decode(AppConfig.self, from: data)
@@ -34,8 +37,13 @@ func configRoundTripsProfilesAndBuckets() throws {
     #expect(decoded.profiles.first?.name == "Cloudflare")
     #expect(decoded.profiles.first?.buckets.first?.bucketName == "assets")
     #expect(decoded.profiles.first?.buckets.first?.endpoint.absoluteString == "https://abc.r2.cloudflarestorage.com")
+    #expect(decoded.profiles.first?.buckets.first?.publicBaseURL?.absoluteString == "https://cdn.example.com/assets")
     #expect(decoded.favoriteBucketIDs == [bucket.id])
     #expect(decoded.recentBucketIDs == [bucket.id])
+    #expect(decoded.favoriteDirectories == [
+        FavoriteDirectory(bucketID: bucket.id, bucketName: bucket.bucketName, prefix: "images/raw/")
+    ])
+    #expect(decoded.languageCode == "en")
 }
 
 @Test
@@ -54,6 +62,37 @@ func pathStyleObjectURLPercentEncodesObjectKey() throws {
 }
 
 @Test
+func publicObjectURLUsesPublicBaseURLWhenConfigured() throws {
+    let bucket = BucketConfig(
+        displayName: "Docs",
+        bucketName: "docs",
+        endpoint: URL(string: "https://abc.r2.cloudflarestorage.com")!,
+        region: "auto",
+        accessKeyID: "key",
+        publicBaseURL: URL(string: "https://static.example.com/assets")!
+    )
+
+    let url = try S3RequestBuilder.publicObjectURL(for: bucket, key: "folder/a file.txt")
+
+    #expect(url.absoluteString == "https://static.example.com/assets/folder/a%20file.txt")
+}
+
+@Test
+func publicObjectURLFallsBackToEndpointWhenPublicBaseURLIsMissing() throws {
+    let bucket = BucketConfig(
+        displayName: "Docs",
+        bucketName: "docs",
+        endpoint: URL(string: "https://abc.r2.cloudflarestorage.com")!,
+        region: "auto",
+        accessKeyID: "key"
+    )
+
+    let url = try S3RequestBuilder.publicObjectURL(for: bucket, key: "og.png")
+
+    #expect(url.absoluteString == "https://abc.r2.cloudflarestorage.com/docs/og.png")
+}
+
+@Test
 func canonicalQuerySortsAndEscapesValues() {
     let query = S3Signer.canonicalQuery([
         URLQueryItem(name: "prefix", value: "folder/a file"),
@@ -62,6 +101,28 @@ func canonicalQuerySortsAndEscapesValues() {
     ])
 
     #expect(query == "delimiter=%2F&list-type=2&prefix=folder%2Fa%20file")
+}
+
+@Test
+func signingFolderObjectKeepsTrailingSlashInCanonicalPath() throws {
+    let bucket = BucketConfig(
+        displayName: "Docs",
+        bucketName: "docs",
+        endpoint: URL(string: "https://abc.r2.cloudflarestorage.com")!,
+        region: "auto",
+        accessKeyID: "access"
+    )
+    let credentials = S3Credentials(accessKeyID: "access", secretAccessKey: "secret")
+    let url = try S3RequestBuilder.objectURL(for: bucket, key: "aaa/")
+    let date = Date(timeIntervalSince1970: 1_714_910_400)
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "PUT"
+    request.setValue("application/x-directory", forHTTPHeaderField: "Content-Type")
+    try S3Signer.sign(&request, region: bucket.region, credentials: credentials, date: date)
+
+    let authorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
+    #expect(authorization.contains("Signature=876341a0e655010cc73990fd65fb172c88811c90e852996ad565835ba11621ee"))
 }
 
 @Test
@@ -158,6 +219,8 @@ func configDecodesOlderFilesWithDefaults() throws {
     #expect(decoded.favoriteBucketIDs.isEmpty)
     #expect(decoded.recentBucketIDs.isEmpty)
     #expect(decoded.history.isEmpty)
+    #expect(decoded.favoriteDirectories.isEmpty)
+    #expect(decoded.languageCode == "zh")
 }
 
 @Test

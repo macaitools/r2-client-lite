@@ -36,6 +36,18 @@ struct ContentView: View {
             HistoryView()
                 .environmentObject(state)
         }
+        .sheet(isPresented: $state.showingAppSettings) {
+            AppSettingsView()
+                .environmentObject(state)
+        }
+        .alert(L10n.t("delete_bucket_confirm_title"), isPresented: $state.showingBucketDeleteConfirm) {
+            Button(L10n.t("delete_bucket"), role: .destructive) {
+                state.removeSelectedBucket()
+            }
+            Button(L10n.t("cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("delete_bucket_confirm_message"))
+        }
     }
 }
 
@@ -53,6 +65,9 @@ struct SidebarView: View {
                         ForEach(state.favoriteBuckets) { bucket in
                             Label(bucket.displayName, systemImage: "star.fill")
                                 .tag(Optional(bucket.id))
+                                .contextMenu {
+                                    bucketContextMenu(for: bucket)
+                                }
                         }
                     }
                 }
@@ -62,6 +77,22 @@ struct SidebarView: View {
                         ForEach(state.recentBuckets) { bucket in
                             Label(bucket.displayName, systemImage: "clock")
                                 .tag(Optional(bucket.id))
+                                .contextMenu {
+                                    bucketContextMenu(for: bucket)
+                                }
+                        }
+                    }
+                }
+
+                if !state.favoriteDirectoryItems.isEmpty {
+                    Section(L10n.t("favorite_directories")) {
+                        ForEach(state.favoriteDirectoryItems) { item in
+                            Button {
+                                state.enterFavoriteDirectory(item)
+                            } label: {
+                                Label(item.displayName, systemImage: "folder.fill")
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -72,6 +103,9 @@ struct SidebarView: View {
                             ForEach(profile.buckets) { bucket in
                                 Label(bucket.displayName, systemImage: "externaldrive.connected.to.line.below")
                                     .tag(Optional(bucket.id))
+                                    .contextMenu {
+                                        bucketContextMenu(for: bucket)
+                                    }
                             }
                         }
                     }
@@ -88,17 +122,20 @@ struct SidebarView: View {
                     Label(L10n.t("add_bucket"), systemImage: "plus")
                 }
                 .buttonStyle(.borderless)
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
 
                 Spacer()
 
                 Button {
-                    state.startEditingBucket()
+                    state.showingAppSettings = true
                 } label: {
-                    Image(systemName: "gearshape")
+                    Label(L10n.t("settings"), systemImage: "gearshape")
                 }
                 .help(L10n.t("settings"))
                 .buttonStyle(.borderless)
-                .disabled(state.selectedBucket == nil)
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
             }
             .padding(12)
 
@@ -106,33 +143,58 @@ struct SidebarView: View {
                 Button {
                     state.importConfig()
                 } label: {
-                    Image(systemName: "square.and.arrow.down")
+                    Label(L10n.t("import_config"), systemImage: "square.and.arrow.down")
                 }
                 .help(L10n.t("import_config"))
                 .buttonStyle(.borderless)
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
 
                 Button {
                     state.exportConfig()
                 } label: {
-                    Image(systemName: "square.and.arrow.up")
+                    Label(L10n.t("export_config"), systemImage: "square.and.arrow.up")
                 }
                 .help(L10n.t("export_config"))
                 .buttonStyle(.borderless)
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
 
                 Spacer()
 
                 Button {
                     state.showingHistory = true
                 } label: {
-                    Image(systemName: "clock.arrow.circlepath")
+                    Label(L10n.t("history"), systemImage: "clock.arrow.circlepath")
                 }
                 .help(L10n.t("history"))
                 .buttonStyle(.borderless)
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
         }
         .navigationSplitViewColumnWidth(min: 220, ideal: 260)
+    }
+
+    @ViewBuilder
+    private func bucketContextMenu(for bucket: BucketConfig) -> some View {
+        Button(L10n.t("settings")) {
+            state.startEditingBucket(bucket)
+        }
+        Button(L10n.t("favorite")) {
+            state.toggleFavoriteBucket(id: bucket.id)
+        }
+        Button(role: .destructive) {
+            state.confirmRemoveBucket(bucket)
+        } label: {
+            Text(L10n.t("delete"))
+        }
+        Divider()
+        Button(L10n.t("test_connection")) {
+            state.testConnection(bucket: bucket)
+        }
     }
 }
 
@@ -188,86 +250,86 @@ struct ObjectBrowserView: View {
                 Button {
                     Task { await state.refresh() }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Label(L10n.t("refresh"), systemImage: "arrow.clockwise")
                 }
                 .help(L10n.t("refresh"))
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
                 .disabled(state.selectedBucket == nil || state.isLoading)
                 .keyboardShortcut("r", modifiers: .command)
 
                 Button {
                     state.upload()
                 } label: {
-                    Image(systemName: "square.and.arrow.up")
+                    Label(L10n.t("upload"), systemImage: "square.and.arrow.up")
                 }
                 .help(L10n.t("upload"))
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
                 .disabled(state.selectedBucket == nil || state.isLoading)
                 .keyboardShortcut("u", modifiers: .command)
 
                 Button {
                     state.showingNewFolder = true
                 } label: {
-                    Image(systemName: "folder.badge.plus")
+                    Label(L10n.t("new_folder"), systemImage: "folder.badge.plus")
                 }
                 .help(L10n.t("new_folder"))
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
                 .disabled(state.selectedBucket == nil || state.isLoading)
                 .keyboardShortcut("n", modifiers: [.command, .shift])
 
                 Button {
                     Task { await state.openSelectedObject() }
                 } label: {
-                    Image(systemName: "arrow.up.right.square")
+                    Label(L10n.t("open"), systemImage: "arrow.up.right.square")
                 }
                 .help(L10n.t("open"))
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
                 .disabled(state.selectedCount != 1 || state.isLoading)
                 .keyboardShortcut(.return, modifiers: [])
 
                 Button {
                     state.downloadSelectedObjects()
                 } label: {
-                    Image(systemName: "arrow.down.circle")
+                    Label(L10n.t("download"), systemImage: "arrow.down.circle")
                 }
                 .help(L10n.t("download"))
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
                 .disabled(state.selectedCount == 0 || state.isLoading)
                 .keyboardShortcut("d", modifiers: .command)
 
                 Button {
                     state.startRenameMove()
                 } label: {
-                    Image(systemName: "arrowshape.turn.up.right")
+                    Label(L10n.t("rename_move"), systemImage: "arrowshape.turn.up.right")
                 }
                 .help(L10n.t("rename_move"))
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
                 .disabled(state.selectedCount != 1 || state.isLoading)
 
                 Button {
                     Task { await state.loadSelectedDetails() }
                 } label: {
-                    Image(systemName: "info.circle")
+                    Label(L10n.t("details"), systemImage: "info.circle")
                 }
                 .help(L10n.t("details"))
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
                 .disabled(state.selectedCount != 1 || state.isLoading)
-
-                Button {
-                    state.toggleFavoriteSelectedBucket()
-                } label: {
-                    Image(systemName: state.selectedBucketIsFavorite ? "star.fill" : "star")
-                }
-                .help(L10n.t("favorite"))
-                .disabled(state.selectedBucket == nil)
-
-                Button {
-                    state.testConnection()
-                } label: {
-                    Image(systemName: "checkmark.seal")
-                }
-                .help(L10n.t("test_connection"))
-                .disabled(state.selectedBucket == nil || state.isLoading)
 
                 Button(role: .destructive) {
                     state.showingDeleteConfirm = true
                 } label: {
-                    Image(systemName: "trash")
+                    Label(L10n.t("delete"), systemImage: "trash")
                 }
                 .help(L10n.t("delete"))
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 11))
                 .disabled(state.selectedCount == 0 || state.isLoading)
                 .keyboardShortcut(.delete, modifiers: [])
             }
@@ -334,6 +396,17 @@ struct ObjectBrowserView: View {
                 message: state.selectedBucket?.bucketName ?? "",
                 systemImage: "tray"
             )
+            .contextMenu {
+                Button(L10n.t("refresh")) {
+                    Task { await state.refresh() }
+                }
+                Button(L10n.t("upload")) {
+                    state.upload()
+                }
+                Button(L10n.t("new_folder")) {
+                    state.showingNewFolder = true
+                }
+            }
         } else {
             ObjectListView()
                 .environmentObject(state)
@@ -350,12 +423,33 @@ struct HeaderView: View {
                 Text(state.selectedBucket?.displayName ?? L10n.t("app_name"))
                     .font(.title2.weight(.semibold))
                 HStack(spacing: 8) {
-                    Text(state.selectedBucket?.endpoint.host() ?? "S3 / Cloudflare R2")
-                    Text("·")
-                    Text("\(L10n.t("path")): \(state.pathLabel)")
+                    Text("\(L10n.t("path")):")
+                        .foregroundStyle(.secondary)
+                    ForEach(Array(state.pathItems.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 {
+                            Text("/")
+                                .foregroundStyle(.secondary)
+                        }
+                        Button(item.title) {
+                            state.enterPrefix(item.prefix)
+                        }
+                        .buttonStyle(.link)
+                    }
+
+                    Button {
+                        state.toggleFavoriteCurrentDirectory()
+                    } label: {
+                        Label(
+                            state.currentDirectoryIsFavorite ? L10n.t("unfavorite_directory") : L10n.t("favorite_directory"),
+                            systemImage: state.currentDirectoryIsFavorite ? "star.fill" : "star"
+                        )
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .disabled(state.currentPrefix.isEmpty)
+                    .help(state.currentDirectoryIsFavorite ? L10n.t("unfavorite_directory") : L10n.t("favorite_directory"))
                 }
                 .font(.callout)
-                .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -387,20 +481,6 @@ struct ObjectListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !state.currentPrefix.isEmpty {
-                HStack {
-                    Button {
-                        state.goUp()
-                    } label: {
-                        Label(L10n.t("up"), systemImage: "chevron.up")
-                    }
-                    .buttonStyle(.borderless)
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-            }
-
             HStack {
                 Text(L10n.t("name")).frame(maxWidth: .infinity, alignment: .leading)
                 Text(L10n.t("size")).frame(width: 110, alignment: .trailing)
@@ -417,11 +497,30 @@ struct ObjectListView: View {
                     FolderRow(prefix: prefix) {
                         state.enterPrefix(prefix.prefix)
                     }
+                    .contextMenu {
+                        Button(L10n.t("open")) {
+                            state.enterPrefix(prefix.prefix)
+                        }
+                        Button(L10n.t("copy_key")) {
+                            state.copyKey(prefix.prefix)
+                        }
+                        Button(L10n.t("copy_url")) {
+                            state.copyObjectURL(key: prefix.prefix)
+                        }
+                        Divider()
+                        Button(L10n.t("favorite_directory")) {
+                            state.toggleFavoriteDirectory(prefix: prefix.prefix)
+                        }
+                    }
                 }
 
                 ForEach(state.displayedObjects) { object in
                     ObjectRow(object: object, displayName: state.objectName(for: object.key))
                         .tag(object.key)
+                        .onTapGesture(count: 2) {
+                            state.selectedObjectKeys = [object.key]
+                            Task { await state.openSelectedObject() }
+                        }
                         .contextMenu {
                             Button(L10n.t("open")) {
                                 state.selectedObjectKeys = [object.key]
@@ -461,6 +560,23 @@ struct ObjectListView: View {
                 }
             }
             .listStyle(.inset(alternatesRowBackgrounds: true))
+            .contextMenu {
+                Button(L10n.t("refresh")) {
+                    Task { await state.refresh() }
+                }
+                Button(L10n.t("upload")) {
+                    state.upload()
+                }
+                Button(L10n.t("new_folder")) {
+                    state.showingNewFolder = true
+                }
+                if !state.currentPrefix.isEmpty {
+                    Divider()
+                    Button(state.currentDirectoryIsFavorite ? L10n.t("unfavorite_directory") : L10n.t("favorite_directory")) {
+                        state.toggleFavoriteCurrentDirectory()
+                    }
+                }
+            }
         }
     }
 }
@@ -544,6 +660,57 @@ struct EmptyStateView: View {
     }
 }
 
+struct AppSettingsView: View {
+    @EnvironmentObject private var state: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text(L10n.t("settings"))
+                    .font(.title2.weight(.semibold))
+                Spacer()
+                Button("OK") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.t("app_name"))
+                    .font(.headline)
+                Text(L10n.t("software_intro"))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            Picker(L10n.t("language"), selection: Binding(
+                get: { state.languageCode },
+                set: { state.setLanguage($0) }
+            )) {
+                Text("中文").tag("zh")
+                Text("English").tag("en")
+            }
+            .pickerStyle(.segmented)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.t("about"))
+                    .font(.headline)
+                Link(
+                    L10n.t("github_repository"),
+                    destination: URL(string: "https://github.com/macaitools/s3-client-lite")!
+                )
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+    }
+}
+
 struct BucketEditorView: View {
     @EnvironmentObject private var state: AppState
     @Environment(\.dismiss) private var dismiss
@@ -556,6 +723,7 @@ struct BucketEditorView: View {
             displayName: bucket?.displayName ?? "",
             bucketName: bucket?.bucketName ?? "",
             endpoint: bucket?.endpoint.absoluteString ?? "",
+            publicBaseURL: bucket?.publicBaseURL?.absoluteString ?? "",
             region: bucket?.region ?? "auto",
             accessKeyID: bucket?.accessKeyID ?? "",
             secretAccessKey: ""
@@ -578,6 +746,7 @@ struct BucketEditorView: View {
                         form.region = "auto"
                     }
                 }
+                TextField(L10n.t("public_base_url"), text: $form.publicBaseURL)
                 TextField(L10n.t("region"), text: $form.region)
                 TextField(L10n.t("access_key"), text: $form.accessKeyID)
                 SecureField(L10n.t("secret_key"), text: $form.secretAccessKey)

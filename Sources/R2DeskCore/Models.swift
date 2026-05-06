@@ -5,17 +5,23 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var favoriteBucketIDs: [UUID]
     public var recentBucketIDs: [UUID]
     public var history: [OperationHistoryEntry]
+    public var favoriteDirectories: [FavoriteDirectory]
+    public var languageCode: String
 
     public init(
         profiles: [StorageProfile] = [],
         favoriteBucketIDs: [UUID] = [],
         recentBucketIDs: [UUID] = [],
-        history: [OperationHistoryEntry] = []
+        history: [OperationHistoryEntry] = [],
+        favoriteDirectories: [FavoriteDirectory] = [],
+        languageCode: String = "zh"
     ) {
         self.profiles = profiles
         self.favoriteBucketIDs = favoriteBucketIDs
         self.recentBucketIDs = recentBucketIDs
         self.history = history
+        self.favoriteDirectories = favoriteDirectories
+        self.languageCode = languageCode
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -23,6 +29,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
         case favoriteBucketIDs
         case recentBucketIDs
         case history
+        case favoriteDirectories
+        case languageCode
     }
 
     public init(from decoder: Decoder) throws {
@@ -31,6 +39,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
         favoriteBucketIDs = try container.decodeIfPresent([UUID].self, forKey: .favoriteBucketIDs) ?? []
         recentBucketIDs = try container.decodeIfPresent([UUID].self, forKey: .recentBucketIDs) ?? []
         history = try container.decodeIfPresent([OperationHistoryEntry].self, forKey: .history) ?? []
+        favoriteDirectories = try container.decodeIfPresent([FavoriteDirectory].self, forKey: .favoriteDirectories) ?? []
+        languageCode = try container.decodeIfPresent(String.self, forKey: .languageCode) ?? "zh"
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -39,6 +49,20 @@ public struct AppConfig: Codable, Equatable, Sendable {
         try container.encode(favoriteBucketIDs, forKey: .favoriteBucketIDs)
         try container.encode(recentBucketIDs, forKey: .recentBucketIDs)
         try container.encode(history, forKey: .history)
+        try container.encode(favoriteDirectories, forKey: .favoriteDirectories)
+        try container.encode(languageCode, forKey: .languageCode)
+    }
+}
+
+public struct FavoriteDirectory: Codable, Equatable, Hashable, Sendable {
+    public var bucketID: UUID
+    public var bucketName: String
+    public var prefix: String
+
+    public init(bucketID: UUID, bucketName: String, prefix: String) {
+        self.bucketID = bucketID
+        self.bucketName = bucketName
+        self.prefix = prefix
     }
 }
 
@@ -61,6 +85,7 @@ public struct BucketConfig: Codable, Identifiable, Equatable, Hashable, Sendable
     public var endpoint: URL
     public var region: String
     public var accessKeyID: String
+    public var publicBaseURL: URL?
 
     public init(
         id: UUID = UUID(),
@@ -68,7 +93,8 @@ public struct BucketConfig: Codable, Identifiable, Equatable, Hashable, Sendable
         bucketName: String,
         endpoint: URL,
         region: String,
-        accessKeyID: String
+        accessKeyID: String,
+        publicBaseURL: URL? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -76,6 +102,7 @@ public struct BucketConfig: Codable, Identifiable, Equatable, Hashable, Sendable
         self.endpoint = endpoint
         self.region = region
         self.accessKeyID = accessKeyID
+        self.publicBaseURL = publicBaseURL
     }
 }
 

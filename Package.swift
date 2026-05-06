@@ -15,7 +15,7 @@ let package = Package(
         .executableTarget(
             name: "R2Desk",
             dependencies: ["R2DeskCore"],
-            exclude: ["Resources/Info.plist"]
+            exclude: ["Resources"]
         ),
         .target(
             name: "R2DeskCore"

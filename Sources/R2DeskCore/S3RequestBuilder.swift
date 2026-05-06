@@ -6,6 +6,14 @@ public enum S3RequestBuilder {
         return try endpointURL(bucket.endpoint, pathComponents: path)
     }
 
+    public static func publicObjectURL(for bucket: BucketConfig, key: String) throws -> URL {
+        guard let publicBaseURL = bucket.publicBaseURL else {
+            return try objectURL(for: bucket, key: key)
+        }
+        let path = key.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        return try endpointURL(publicBaseURL, pathComponents: path)
+    }
+
     public static func listURL(for bucket: BucketConfig, prefix: String? = nil, delimiter: String? = nil) throws -> URL {
         var components = URLComponents(url: try endpointURL(bucket.endpoint, pathComponents: [bucket.bucketName]), resolvingAgainstBaseURL: false)
         var queryItems = [

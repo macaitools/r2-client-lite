@@ -46,7 +46,7 @@ public enum S3Signer {
         let signedHeaderNames = signedHeaders.keys.sorted().joined(separator: ";")
         let canonicalRequest = [
             request.httpMethod ?? "GET",
-            canonicalPath(url.path),
+            canonicalPath(URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? url.path),
             canonicalQuery(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []),
             headerLines,
             signedHeaderNames,
@@ -99,7 +99,7 @@ public enum S3Signer {
 
         let canonicalRequest = [
             method,
-            canonicalPath(url.path),
+            canonicalPath(URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? url.path),
             canonicalQuery(queryItems),
             "host:\(host)\n",
             "host",

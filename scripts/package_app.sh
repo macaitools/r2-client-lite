@@ -19,6 +19,7 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$BIN_DIR/R2Desk" "$MACOS_DIR/R2Desk"
 cp "$ROOT_DIR/Sources/R2Desk/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
+cp "$ROOT_DIR/Sources/R2Desk/Resources/R2Desk.icns" "$RESOURCES_DIR/R2Desk.icns"
 printf "APPL????" > "$CONTENTS_DIR/PkgInfo"
 
 chmod +x "$MACOS_DIR/R2Desk"

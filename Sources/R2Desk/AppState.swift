@@ -22,6 +22,7 @@ final class AppState: ObservableObject {
     @Published var failedUploadURLs: [URL] = []
     @Published var statusText = L10n.t("status_ready")
     @Published var errorMessage: String?
+    @Published var showingAppSettings = false
     @Published var showingBucketEditor = false
     @Published var editingBucket: BucketConfig?
     @Published var showingDeleteConfirm = false
@@ -36,12 +37,50 @@ final class AppState: ObservableObject {
     @Published var showingUploadConflict = false
     @Published var bucketUsage: BucketUsage?
     @Published var pendingUploadURLs: [URL] = []
+    @Published var languageCode = "zh" {
+        didSet {
+            L10n.languageCode = languageCode
+        }
+    }
 
     private let configStore = ConfigStore()
     private let secretStore = KeychainSecretStore()
     private let client = S3Client()
     private var didLoad = false
     private var uploadTask: Task<Void, Never>?
+    private var uploadQueue: [UploadBatch] = []
+    private var failedUploadItems: [UploadItem] = []
+
+    private struct UploadBatch {
+        var items: [UploadItem]
+        var bucket: BucketConfig
+        var conflictMode: UploadConflictMode
+    }
+
+    private struct UploadItem {
+        var fileURL: URL
+        var key: String
+    }
+
+    struct FavoriteDirectoryItem: Identifiable {
+        var favorite: FavoriteDirectory
+        var bucket: BucketConfig
+
+        var id: String {
+            "\(favorite.bucketID.uuidString):\(favorite.prefix)"
+        }
+
+        var displayName: String {
+            let folder = ObjectPrefix(prefix: favorite.prefix).displayName
+            return "\(bucket.displayName) / \(folder)"
+        }
+    }
+
+    struct PathItem: Identifiable {
+        var title: String
+        var prefix: String
+        var id: String { prefix.isEmpty ? "root" : prefix }
+    }
 
     enum UploadConflictMode {
         case ask
@@ -96,6 +135,32 @@ final class AppState: ObservableObject {
         return config.favoriteBucketIDs.contains(selectedBucketID)
     }
 
+    var favoriteDirectoryItems: [FavoriteDirectoryItem] {
+        let buckets = config.profiles.flatMap(\.buckets)
+        return config.favoriteDirectories.compactMap { favorite in
+            guard let bucket = buckets.first(where: { $0.id == favorite.bucketID }) else { return nil }
+            return FavoriteDirectoryItem(favorite: favorite, bucket: bucket)
+        }
+    }
+
+    var currentDirectoryIsFavorite: Bool {
+        guard let selectedBucketID, !currentPrefix.isEmpty else { return false }
+        return config.favoriteDirectories.contains {
+            $0.bucketID == selectedBucketID && $0.prefix == currentPrefix
+        }
+    }
+
+    var pathItems: [PathItem] {
+        var items = [PathItem(title: L10n.t("root"), prefix: "")]
+        let parts = currentPrefix.trimmingCharacters(in: CharacterSet(charactersIn: "/")).split(separator: "/").map(String.init)
+        var prefix = ""
+        for part in parts {
+            prefix += "\(part)/"
+            items.append(PathItem(title: part, prefix: prefix))
+        }
+        return items
+    }
+
     var pathLabel: String {
         currentPrefix.isEmpty ? L10n.t("root") : currentPrefix
     }
@@ -105,6 +170,8 @@ final class AppState: ObservableObject {
         didLoad = true
         do {
             config = try configStore.load()
+            languageCode = config.languageCode
+            L10n.languageCode = config.languageCode
             selectedBucketID = config.profiles.flatMap(\.buckets).first?.id
             requestNotificationPermission()
             if selectedBucketID != nil {
@@ -145,7 +212,7 @@ final class AppState: ObservableObject {
     func upload() {
         guard selectedBucket != nil else { return }
         let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = true
         guard panel.runModal() == .OK else { return }
@@ -154,9 +221,12 @@ final class AppState: ObservableObject {
 
     func uploadFiles(_ urls: [URL], conflictMode: UploadConflictMode = .ask) {
         guard let bucket = selectedBucket, !urls.isEmpty else { return }
+        let prefix = currentPrefix
+        let items = uploadItems(for: urls, in: prefix)
+        guard !items.isEmpty else { return }
         let existingKeys = Set(objects.map(\.key))
-        let conflicts = urls.filter { fileURL in
-            existingKeys.contains(PrefixNavigator.childObjectKey(fileName: fileURL.lastPathComponent, in: currentPrefix))
+        let conflicts = items.filter { item in
+            existingKeys.contains(item.key)
         }
         if conflictMode == .ask, !conflicts.isEmpty {
             pendingUploadURLs = urls
@@ -164,10 +234,22 @@ final class AppState: ObservableObject {
             return
         }
 
-        uploadTask?.cancel()
+        uploadQueue.append(UploadBatch(items: items, bucket: bucket, conflictMode: conflictMode))
+        startNextUploadIfNeeded()
+    }
+
+    private func startNextUploadIfNeeded() {
+        guard uploadTask == nil, !uploadQueue.isEmpty else { return }
+        let batch = uploadQueue.removeFirst()
+        let items = batch.items
+        let bucket = batch.bucket
+        let conflictMode = batch.conflictMode
+        let existingKeys = Set(objects.map(\.key))
+
         failedUploadURLs = []
+        failedUploadItems = []
         uploadProgressFraction = 0
-        uploadProgressText = String(format: L10n.t("upload_progress"), 0, urls.count)
+        uploadProgressText = String(format: L10n.t("upload_progress"), 0, items.count)
         isUploading = true
         isLoading = true
         statusText = L10n.t("status_uploading")
@@ -175,25 +257,25 @@ final class AppState: ObservableObject {
         uploadTask = Task {
             do {
                 let credentials = try self.credentials(for: bucket)
-                var failed: [URL] = []
-                for (index, fileURL) in urls.enumerated() {
+                var failed: [UploadItem] = []
+                for (index, item) in items.enumerated() {
                     if Task.isCancelled { throw CancellationError() }
-                    let desiredKey = PrefixNavigator.childObjectKey(fileName: fileURL.lastPathComponent, in: self.currentPrefix)
                     let key = conflictMode == .rename
-                        ? UniqueKeyResolver.availableKey(for: desiredKey, existingKeys: existingKeys)
-                        : desiredKey
-                    self.uploadProgressText = String(format: L10n.t("upload_progress"), index + 1, urls.count)
-                    self.uploadProgressFraction = Double(index) / Double(urls.count)
+                        ? UniqueKeyResolver.availableKey(for: item.key, existingKeys: existingKeys)
+                        : item.key
+                    self.uploadProgressText = String(format: L10n.t("upload_progress"), index + 1, items.count)
+                    self.uploadProgressFraction = Double(index) / Double(items.count)
                     do {
-                        try await self.client.upload(fileURL: fileURL, to: bucket, credentials: credentials, key: key)
+                        try await self.client.upload(fileURL: item.fileURL, to: bucket, credentials: credentials, key: key)
                         self.recordHistory(action: L10n.t("upload"), detail: key, bucketName: bucket.bucketName, succeeded: true)
                     } catch {
-                        failed.append(fileURL)
-                        self.recordHistory(action: L10n.t("upload"), detail: fileURL.lastPathComponent, bucketName: bucket.bucketName, succeeded: false)
+                        failed.append(item)
+                        self.recordHistory(action: L10n.t("upload"), detail: item.fileURL.lastPathComponent, bucketName: bucket.bucketName, succeeded: false)
                     }
                 }
                 self.uploadProgressFraction = 1
-                self.failedUploadURLs = failed
+                self.failedUploadItems = failed
+                self.failedUploadURLs = failed.map(\.fileURL)
                 if !Task.isCancelled {
                     await self.refresh()
                 }
@@ -207,16 +289,22 @@ final class AppState: ObservableObject {
             } catch {
                 self.errorMessage = error.localizedDescription
             }
-            self.isUploading = false
-            self.isLoading = false
-            self.uploadProgressText = ""
-            self.statusText = L10n.t("status_ready")
+            self.uploadTask = nil
+            if self.uploadQueue.isEmpty {
+                self.isUploading = false
+                self.isLoading = false
+                self.uploadProgressText = ""
+                self.statusText = L10n.t("status_ready")
+            } else {
+                self.startNextUploadIfNeeded()
+            }
         }
     }
 
     func cancelUpload() {
         uploadTask?.cancel()
         uploadTask = nil
+        uploadQueue = []
         isUploading = false
         isLoading = false
         uploadProgressText = ""
@@ -225,8 +313,15 @@ final class AppState: ObservableObject {
 
     func retryFailedUploads() {
         let urls = failedUploadURLs
+        let items = failedUploadItems
         failedUploadURLs = []
-        uploadFiles(urls)
+        failedUploadItems = []
+        guard let bucket = selectedBucket, !items.isEmpty else {
+            uploadFiles(urls)
+            return
+        }
+        uploadQueue.append(UploadBatch(items: items, bucket: bucket, conflictMode: .ask))
+        startNextUploadIfNeeded()
     }
 
     func resolveUploadConflict(replace: Bool) {
@@ -315,7 +410,20 @@ final class AppState: ObservableObject {
     func enterPrefix(_ prefix: String) {
         currentPrefix = prefix
         selectedObjectKey = nil
+        selectedObjectKeys = []
         searchText = ""
+        Task { await refresh() }
+    }
+
+    func enterFavoriteDirectory(_ item: FavoriteDirectoryItem) {
+        selectedBucketID = item.bucket.id
+        selectedObjectKey = nil
+        selectedObjectKeys = []
+        objects = []
+        prefixes = []
+        searchText = ""
+        currentPrefix = item.favorite.prefix
+        updateRecentBucket()
         Task { await refresh() }
     }
 
@@ -363,11 +471,20 @@ final class AppState: ObservableObject {
 
     func copySelectedKey() {
         guard let object = selectedObject else { return }
-        copyToPasteboard(object.key)
+        copyKey(object.key)
+    }
+
+    func copyKey(_ key: String) {
+        copyToPasteboard(key)
     }
 
     func copySelectedObjectURL() {
-        guard let bucket = selectedBucket, let object = selectedObject, let url = try? S3RequestBuilder.objectURL(for: bucket, key: object.key) else { return }
+        guard let object = selectedObject else { return }
+        copyObjectURL(key: object.key)
+    }
+
+    func copyObjectURL(key: String) {
+        guard let bucket = selectedBucket, let url = try? S3RequestBuilder.publicObjectURL(for: bucket, key: key) else { return }
         copyToPasteboard(url.absoluteString)
     }
 
@@ -403,13 +520,20 @@ final class AppState: ObservableObject {
                 errorMessage = S3Error.invalidURL.localizedDescription
                 return
             }
+            let publicBaseURLText = form.publicBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            let publicBaseURL = publicBaseURLText.isEmpty ? nil : URL(string: publicBaseURLText)
+            guard publicBaseURLText.isEmpty || publicBaseURL != nil else {
+                errorMessage = S3Error.invalidURL.localizedDescription
+                return
+            }
             bucket = BucketConfig(
                 id: form.id ?? UUID(),
                 displayName: form.displayName.isEmpty ? form.bucketName : form.displayName,
                 bucketName: form.bucketName,
                 endpoint: endpoint,
                 region: form.region.isEmpty ? "auto" : form.region,
-                accessKeyID: form.accessKeyID
+                accessKeyID: form.accessKeyID,
+                publicBaseURL: publicBaseURL
             )
             secret = form.secretAccessKey
         } else {
@@ -430,13 +554,46 @@ final class AppState: ObservableObject {
         }
     }
 
+    func testConnection(bucket: BucketConfig) {
+        Task {
+            await run(status: L10n.t("status_loading")) {
+                _ = try await self.client.list(in: bucket, credentials: self.credentials(for: bucket), prefix: "", delimiter: "/")
+                self.statusText = L10n.t("connection_ok")
+            }
+        }
+    }
+
     func toggleFavoriteSelectedBucket() {
         guard let selectedBucketID else { return }
-        if config.favoriteBucketIDs.contains(selectedBucketID) {
-            config.favoriteBucketIDs.removeAll { $0 == selectedBucketID }
+        toggleFavoriteBucket(id: selectedBucketID)
+    }
+
+    func toggleFavoriteBucket(id: UUID) {
+        if config.favoriteBucketIDs.contains(id) {
+            config.favoriteBucketIDs.removeAll { $0 == id }
         } else {
-            config.favoriteBucketIDs.insert(selectedBucketID, at: 0)
+            config.favoriteBucketIDs.insert(id, at: 0)
         }
+        saveConfig()
+    }
+
+    func toggleFavoriteCurrentDirectory() {
+        toggleFavoriteDirectory(prefix: currentPrefix)
+    }
+
+    func toggleFavoriteDirectory(prefix: String) {
+        guard let bucket = selectedBucket, !prefix.isEmpty else { return }
+        if let index = config.favoriteDirectories.firstIndex(where: { $0.bucketID == bucket.id && $0.prefix == prefix }) {
+            config.favoriteDirectories.remove(at: index)
+        } else {
+            config.favoriteDirectories.insert(FavoriteDirectory(bucketID: bucket.id, bucketName: bucket.bucketName, prefix: prefix), at: 0)
+        }
+        saveConfig()
+    }
+
+    func setLanguage(_ code: String) {
+        languageCode = code
+        config.languageCode = code
         saveConfig()
     }
 
@@ -464,6 +621,7 @@ final class AppState: ObservableObject {
             let data = try Data(contentsOf: url)
             let imported = try JSONDecoder.r2Desk.decode(AppConfig.self, from: data)
             config = imported
+            languageCode = imported.languageCode
             try configStore.save(imported)
             selectedBucketID = imported.profiles.flatMap(\.buckets).first?.id
             selectedObjectKeys = []
@@ -479,6 +637,11 @@ final class AppState: ObservableObject {
             guard let endpoint = URL(string: form.endpoint), !form.bucketName.isEmpty else {
                 throw S3Error.invalidURL
             }
+            let publicBaseURLText = form.publicBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            let publicBaseURL = publicBaseURLText.isEmpty ? nil : URL(string: publicBaseURLText)
+            guard publicBaseURLText.isEmpty || publicBaseURL != nil else {
+                throw S3Error.invalidURL
+            }
 
             let bucketID = form.id ?? UUID()
             let bucket = BucketConfig(
@@ -487,7 +650,8 @@ final class AppState: ObservableObject {
                 bucketName: form.bucketName,
                 endpoint: endpoint,
                 region: form.region.isEmpty ? "auto" : form.region,
-                accessKeyID: form.accessKeyID
+                accessKeyID: form.accessKeyID,
+                publicBaseURL: publicBaseURL
             )
 
             var next = config
@@ -525,11 +689,14 @@ final class AppState: ObservableObject {
             for index in next.profiles.indices {
                 next.profiles[index].buckets.removeAll { $0.id == selectedBucketID }
             }
+            next.favoriteDirectories.removeAll { $0.bucketID == selectedBucketID }
             next.profiles.removeAll { $0.buckets.isEmpty }
             try configStore.save(next)
             try secretStore.deleteSecret(for: selectedBucketID)
             config = next
             self.selectedBucketID = next.profiles.flatMap(\.buckets).first?.id
+            showingBucketEditor = false
+            showingBucketDeleteConfirm = false
             objects = []
             prefixes = []
             selectedObjectKey = nil
@@ -550,6 +717,16 @@ final class AppState: ObservableObject {
     func startEditingBucket() {
         editingBucket = selectedBucket
         showingBucketEditor = selectedBucket != nil
+    }
+
+    func startEditingBucket(_ bucket: BucketConfig) {
+        editingBucket = bucket
+        showingBucketEditor = true
+    }
+
+    func confirmRemoveBucket(_ bucket: BucketConfig) {
+        selectedBucketID = bucket.id
+        showingBucketDeleteConfirm = true
     }
 
     private func credentials(for bucket: BucketConfig) throws -> S3Credentials {
@@ -582,6 +759,44 @@ final class AppState: ObservableObject {
         return values.filter { name($0).localizedCaseInsensitiveContains(needle) }
     }
 
+    private func uploadItems(for urls: [URL], in prefix: String) -> [UploadItem] {
+        urls.flatMap { url in
+            uploadItems(for: url, in: prefix)
+        }
+    }
+
+    private func uploadItems(for url: URL, in prefix: String) -> [UploadItem] {
+        let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
+        if values?.isDirectory == true {
+            return folderUploadItems(for: url, in: prefix)
+        }
+        guard values?.isRegularFile != false else { return [] }
+        return [UploadItem(fileURL: url, key: PrefixNavigator.childObjectKey(fileName: url.lastPathComponent, in: prefix))]
+    }
+
+    private func folderUploadItems(for folderURL: URL, in prefix: String) -> [UploadItem] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: folderURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        let rootPath = folderURL.standardizedFileURL.path
+        return enumerator.compactMap { item in
+            guard let fileURL = item as? URL else { return nil }
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard values?.isRegularFile == true else { return nil }
+            let filePath = fileURL.standardizedFileURL.path
+            let relativePath = filePath.hasPrefix(rootPath + "/")
+                ? String(filePath.dropFirst(rootPath.count + 1))
+                : fileURL.lastPathComponent
+            let fileName = "\(folderURL.lastPathComponent)/\(relativePath)"
+            return UploadItem(fileURL: fileURL, key: PrefixNavigator.childObjectKey(fileName: fileName, in: prefix))
+        }
+    }
+
     private func copyToPasteboard(_ value: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -612,15 +827,21 @@ final class AppState: ObservableObject {
     }
 
     private func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
+        Task.detached {
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+        }
     }
 
     private func notify(title: String, body: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
+        Task.detached {
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+            try? await UNUserNotificationCenter.current().add(request)
+        }
     }
 
     private func run(status: String, operation: @escaping () async throws -> Void) async {
@@ -644,6 +865,7 @@ struct BucketForm {
     var displayName = ""
     var bucketName = ""
     var endpoint = ""
+    var publicBaseURL = ""
     var region = "auto"
     var accessKeyID = ""
     var secretAccessKey = ""

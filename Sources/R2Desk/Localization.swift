@@ -1,17 +1,22 @@
 import Foundation
 
+@MainActor
 enum L10n {
+    static var languageCode = "zh"
+
     static func t(_ key: String) -> String {
-        let language = Locale.preferredLanguages.first ?? "en"
-        let table = language.hasPrefix("zh") ? zh : en
+        let table = languageCode == "zh" ? zh : en
         return table[key] ?? en[key] ?? key
     }
 
     private static let en: [String: String] = [
         "app_name": "R2Desk",
         "sidebar_title": "Buckets",
-        "add_bucket": "Add Bucket",
+        "add_bucket": "Add",
         "settings": "Settings",
+        "about": "About",
+        "software_intro": "A lightweight S3 and Cloudflare R2 desktop client for browsing, uploading, downloading, and managing objects from this Mac.",
+        "github_repository": "GitHub Repository",
         "refresh": "Refresh",
         "upload": "Upload",
         "open": "Open",
@@ -31,6 +36,7 @@ enum L10n {
         "display_name": "Display Name",
         "bucket_name": "Bucket Name",
         "endpoint": "Endpoint URL",
+        "public_base_url": "Public URL",
         "region": "Region",
         "access_key": "Access Key ID",
         "secret_key": "Secret Access Key",
@@ -76,11 +82,15 @@ enum L10n {
         "favorite": "Favorite",
         "favorites": "Favorites",
         "recent": "Recent",
-        "history": "History",
+        "history": "Log",
+        "language": "Language",
+        "favorite_directory": "Favorite Folder",
+        "favorite_directories": "Favorite Folders",
+        "unfavorite_directory": "Unfavorite Folder",
         "test_connection": "Test Connection",
         "connection_ok": "Connection succeeded",
-        "export_config": "Export Config",
-        "import_config": "Import Config",
+        "export_config": "Export",
+        "import_config": "Import",
         "cloudflare_template": "R2 Template",
         "usage": "Usage",
         "objects_count": "%d objects",
@@ -95,8 +105,11 @@ enum L10n {
     private static let zh: [String: String] = [
         "app_name": "R2Desk",
         "sidebar_title": "存储桶",
-        "add_bucket": "添加 Bucket",
+        "add_bucket": "添加",
         "settings": "设置",
+        "about": "关于",
+        "software_intro": "一个轻量的 S3 和 Cloudflare R2 桌面客户端，用于在这台 Mac 上浏览、上传、下载和管理对象。",
+        "github_repository": "GitHub 仓库",
         "refresh": "刷新",
         "upload": "上传",
         "open": "打开",
@@ -116,6 +129,7 @@ enum L10n {
         "display_name": "显示名称",
         "bucket_name": "Bucket 名称",
         "endpoint": "Endpoint 地址",
+        "public_base_url": "对外访问地址",
         "region": "区域",
         "access_key": "Access Key ID",
         "secret_key": "Secret Access Key",
@@ -161,11 +175,15 @@ enum L10n {
         "favorite": "收藏",
         "favorites": "收藏",
         "recent": "最近",
-        "history": "操作记录",
+        "history": "记录",
+        "language": "语言",
+        "favorite_directory": "收藏目录",
+        "favorite_directories": "收藏目录",
+        "unfavorite_directory": "取消收藏目录",
         "test_connection": "测试连接",
         "connection_ok": "连接成功",
-        "export_config": "导出配置",
-        "import_config": "导入配置",
+        "export_config": "导出",
+        "import_config": "导入",
         "cloudflare_template": "R2 模板",
         "usage": "用量",
         "objects_count": "%d 个对象",
