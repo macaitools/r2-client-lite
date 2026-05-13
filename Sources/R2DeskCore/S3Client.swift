@@ -7,8 +7,8 @@ public final class S3Client: @unchecked Sendable {
         self.session = session
     }
 
-    public func listObjects(in bucket: BucketConfig, credentials: S3Credentials) async throws -> [ObjectItem] {
-        let url = try S3RequestBuilder.listURL(for: bucket)
+    public func listObjects(in bucket: BucketConfig, credentials: S3Credentials, prefix: String = "") async throws -> [ObjectItem] {
+        let url = try S3RequestBuilder.listURL(for: bucket, prefix: prefix)
         let request = try S3RequestBuilder.request(method: "GET", url: url, bucket: bucket, credentials: credentials)
         let data = try await send(request)
         return try S3ListParser.parse(data).objects

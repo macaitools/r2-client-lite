@@ -102,6 +102,15 @@ final class AppState: ObservableObject {
         return objects.filter { keys.contains($0.key) }
     }
 
+    var selectedObjectCount: Int {
+        selectedObjects.count
+    }
+
+    var selectedPrefixes: [ObjectPrefix] {
+        let keys = selectedObjectKeys.isEmpty ? Set<String>() : selectedObjectKeys
+        return prefixes.filter { keys.contains($0.prefix) }
+    }
+
     var hasBucket: Bool {
         !config.profiles.flatMap(\.buckets).isEmpty
     }
@@ -117,7 +126,26 @@ final class AppState: ObservableObject {
     }
 
     var selectedCount: Int {
-        selectedObjects.count
+        selectedObjects.count + selectedPrefixes.count
+    }
+
+    var deleteConfirmationTitle: String {
+        selectedCount > 1 ? L10n.t("batch_delete_confirm_title") : L10n.t("delete_confirm_title")
+    }
+
+    var deleteConfirmationMessage: String {
+        let folderCount = selectedPrefixes.count
+        if folderCount == 0 {
+            return selectedObjectCount > 1
+                ? String(format: L10n.t("batch_delete_files_message"), selectedObjectCount)
+                : L10n.t("delete_file_message")
+        }
+        if selectedObjectCount == 0 {
+            return folderCount > 1
+                ? String(format: L10n.t("batch_delete_folders_message"), folderCount)
+                : L10n.t("delete_folder_message")
+        }
+        return String(format: L10n.t("batch_delete_mixed_message"), selectedCount, selectedObjectCount, folderCount)
     }
 
     var favoriteBuckets: [BucketConfig] {
@@ -367,20 +395,27 @@ final class AppState: ObservableObject {
     }
 
     func deleteSelectedObjects() async {
-        guard let bucket = selectedBucket, !selectedObjects.isEmpty else { return }
+        guard let bucket = selectedBucket, selectedCount > 0 else { return }
         let objectsToDelete = selectedObjects
+        let prefixesToDelete = selectedPrefixes
         await run(status: L10n.t("status_loading")) {
             let credentials = try self.credentials(for: bucket)
-            for object in objectsToDelete {
-                try await self.client.deleteObject(key: object.key, from: bucket, credentials: credentials)
-                self.recordHistory(action: L10n.t("delete"), detail: object.key, bucketName: bucket.bucketName, succeeded: true)
+            var keysToDelete = Set(objectsToDelete.map(\.key))
+            for prefix in prefixesToDelete {
+                let folderObjects = try await self.client.listObjects(in: bucket, credentials: credentials, prefix: prefix.prefix)
+                keysToDelete.formUnion(folderObjects.map(\.key))
+                keysToDelete.insert(prefix.prefix)
+            }
+            for key in keysToDelete.sorted() {
+                try await self.client.deleteObject(key: key, from: bucket, credentials: credentials)
+                self.recordHistory(action: L10n.t("delete"), detail: key, bucketName: bucket.bucketName, succeeded: true)
             }
             let listing = try await self.client.list(in: bucket, credentials: credentials, prefix: self.currentPrefix)
             self.objects = listing.objects
             self.prefixes = listing.prefixes
             self.selectedObjectKey = nil
             self.selectedObjectKeys = []
-            self.bucketUsage = BucketUsage(objects: listing.objects)
+            self.bucketUsage = BucketUsage(objects: try await self.client.listObjects(in: bucket, credentials: credentials))
             self.notify(title: L10n.t("delete"), body: L10n.t("operation_done"))
         }
     }

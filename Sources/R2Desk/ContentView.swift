@@ -281,7 +281,11 @@ struct ObjectBrowserView: View {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
 
                 Button {
-                    Task { await state.openSelectedObject() }
+                    if state.selectedCount == 1, let prefix = state.selectedPrefixes.first {
+                        state.enterPrefix(prefix.prefix)
+                    } else {
+                        Task { await state.openSelectedObject() }
+                    }
                 } label: {
                     Label(L10n.t("open"), systemImage: "arrow.up.right.square")
                 }
@@ -299,7 +303,7 @@ struct ObjectBrowserView: View {
                 .help(L10n.t("download"))
                 .labelStyle(.titleAndIcon)
                 .font(.system(size: 11))
-                .disabled(state.selectedCount == 0 || state.isLoading)
+                .disabled(state.selectedObjectCount == 0 || state.selectedObjectCount != state.selectedCount || state.isLoading)
                 .keyboardShortcut("d", modifiers: .command)
 
                 Button {
@@ -310,7 +314,7 @@ struct ObjectBrowserView: View {
                 .help(L10n.t("rename_move"))
                 .labelStyle(.titleAndIcon)
                 .font(.system(size: 11))
-                .disabled(state.selectedCount != 1 || state.isLoading)
+                .disabled(state.selectedCount != 1 || state.selectedObjectCount != 1 || state.isLoading)
 
                 Button {
                     Task { await state.loadSelectedDetails() }
@@ -320,7 +324,7 @@ struct ObjectBrowserView: View {
                 .help(L10n.t("details"))
                 .labelStyle(.titleAndIcon)
                 .font(.system(size: 11))
-                .disabled(state.selectedCount != 1 || state.isLoading)
+                .disabled(state.selectedCount != 1 || state.selectedObjectCount != 1 || state.isLoading)
 
                 Button(role: .destructive) {
                     state.showingDeleteConfirm = true
@@ -334,13 +338,13 @@ struct ObjectBrowserView: View {
                 .keyboardShortcut(.delete, modifiers: [])
             }
         }
-        .alert(state.selectedCount > 1 ? L10n.t("batch_delete_confirm_title") : L10n.t("delete_confirm_title"), isPresented: $state.showingDeleteConfirm) {
+        .alert(state.deleteConfirmationTitle, isPresented: $state.showingDeleteConfirm) {
             Button(L10n.t("delete"), role: .destructive) {
                 Task { await state.deleteSelectedObjects() }
             }
             Button(L10n.t("cancel"), role: .cancel) {}
         } message: {
-            Text(state.selectedCount > 1 ? L10n.t("batch_delete_confirm_message") : L10n.t("delete_confirm_message"))
+            Text(state.deleteConfirmationMessage)
         }
         .alert(L10n.t("overwrite_title"), isPresented: $state.showingUploadConflict) {
             Button(L10n.t("replace")) {
@@ -495,8 +499,11 @@ struct ObjectListView: View {
             List(selection: $state.selectedObjectKeys) {
                 ForEach(state.displayedPrefixes) { prefix in
                     FolderRow(prefix: prefix) {
+                        state.selectedObjectKeys = [prefix.prefix]
+                    } open: {
                         state.enterPrefix(prefix.prefix)
                     }
+                    .tag(prefix.prefix)
                     .contextMenu {
                         Button(L10n.t("open")) {
                             state.enterPrefix(prefix.prefix)
@@ -510,6 +517,13 @@ struct ObjectListView: View {
                         Divider()
                         Button(L10n.t("favorite_directory")) {
                             state.toggleFavoriteDirectory(prefix: prefix.prefix)
+                        }
+                        Divider()
+                        Button(L10n.t("delete"), role: .destructive) {
+                            if !state.selectedObjectKeys.contains(prefix.prefix) {
+                                state.selectedObjectKeys = [prefix.prefix]
+                            }
+                            state.showingDeleteConfirm = true
                         }
                     }
                 }
@@ -553,7 +567,9 @@ struct ObjectListView: View {
                                 state.startRenameMove()
                             }
                             Button(L10n.t("delete"), role: .destructive) {
-                                state.selectedObjectKeys = [object.key]
+                                if !state.selectedObjectKeys.contains(object.key) {
+                                    state.selectedObjectKeys = [object.key]
+                                }
                                 state.showingDeleteConfirm = true
                             }
                         }
@@ -583,25 +599,41 @@ struct ObjectListView: View {
 
 struct FolderRow: View {
     let prefix: ObjectPrefix
+    let select: () -> Void
     let open: () -> Void
+    @State private var pendingSelect: DispatchWorkItem?
 
     var body: some View {
-        Button(action: open) {
-            HStack {
-                Label(prefix.displayName, systemImage: "folder")
-                    .labelStyle(.titleAndIcon)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(L10n.t("folder"))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 110, alignment: .trailing)
-                Text("-").foregroundStyle(.secondary).frame(width: 170, alignment: .leading)
-                Text("-").foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
-            }
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
+        HStack {
+            Label(prefix.displayName, systemImage: "folder")
+                .labelStyle(.titleAndIcon)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(L10n.t("folder"))
+                .foregroundStyle(.secondary)
+                .frame(width: 110, alignment: .trailing)
+            Text("-").foregroundStyle(.secondary).frame(width: 170, alignment: .leading)
+            Text("-").foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: handleClick)
+    }
+
+    private func handleClick() {
+        if let pendingSelect {
+            pendingSelect.cancel()
+            self.pendingSelect = nil
+            open()
+            return
+        }
+
+        let workItem = DispatchWorkItem {
+            select()
+            pendingSelect = nil
+        }
+        pendingSelect = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: workItem)
     }
 }
 

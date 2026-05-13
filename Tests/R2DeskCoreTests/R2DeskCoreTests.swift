@@ -166,6 +166,36 @@ func listParserReturnsObjectsAndCommonPrefixes() throws {
 }
 
 @Test
+func listObjectsSupportsRecursivePrefixListing() async throws {
+    let bucket = BucketConfig(
+        displayName: "Docs",
+        bucketName: "docs",
+        endpoint: URL(string: "https://abc.r2.cloudflarestorage.com")!,
+        region: "auto",
+        accessKeyID: "access"
+    )
+    let credentials = S3Credentials(accessKeyID: "access", secretAccessKey: "secret")
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [RecordingURLProtocol.self]
+    let client = S3Client(session: URLSession(configuration: configuration))
+    URLProtocolRecorder.shared.requestedURL = nil
+    URLProtocolRecorder.shared.data = Data("""
+    <ListBucketResult>
+      <Contents>
+        <Key>images/raw/logo.png</Key>
+        <Size>128</Size>
+      </Contents>
+    </ListBucketResult>
+    """.utf8)
+
+    let objects = try await client.listObjects(in: bucket, credentials: credentials, prefix: "images/raw/")
+
+    #expect(objects.map { $0.key } == ["images/raw/logo.png"])
+    #expect(URLProtocolRecorder.shared.requestedURL?.absoluteString.contains("prefix=images/raw/") == true)
+    #expect(URLProtocolRecorder.shared.requestedURL?.absoluteString.contains("delimiter=") == false)
+}
+
+@Test
 func mimeTypeDetectorUsesCommonExtensions() {
     #expect(MIMETypeDetector.contentType(for: URL(fileURLWithPath: "/tmp/photo.png")) == "image/png")
     #expect(MIMETypeDetector.contentType(for: URL(fileURLWithPath: "/tmp/page.html")) == "text/html")
@@ -244,4 +274,54 @@ func bucketUsageSumsObjectSizes() {
 
     #expect(usage.objectCount == 2)
     #expect(usage.totalBytes == 30)
+}
+
+private final class URLProtocolRecorder: @unchecked Sendable {
+    static let shared = URLProtocolRecorder()
+    private let lock = NSLock()
+    private var storedData = Data()
+    private var storedRequestedURL: URL?
+
+    var data: Data {
+        get {
+            lock.withLock { storedData }
+        }
+        set {
+            lock.withLock { storedData = newValue }
+        }
+    }
+
+    var requestedURL: URL? {
+        get {
+            lock.withLock { storedRequestedURL }
+        }
+        set {
+            lock.withLock { storedRequestedURL = newValue }
+        }
+    }
+}
+
+private final class RecordingURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        URLProtocolRecorder.shared.requestedURL = request.url
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: URLProtocolRecorder.shared.data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
